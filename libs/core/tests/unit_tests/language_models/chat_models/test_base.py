@@ -1,5 +1,6 @@
 """Test base chat model."""
 
+import gc
 import uuid
 import warnings
 from collections.abc import AsyncIterator, Iterator
@@ -1768,6 +1769,38 @@ def test_generate_response_from_error_handles_streaming_response_failure() -> No
     assert metadata["body"] is None
     assert metadata["headers"] == {"content-type": "application/json"}
     assert metadata["status_code"] == 400
+
+
+def test_generate_response_from_error_closes_async_json_coroutine() -> None:
+    """An async response's `json()` returns a coroutine the sync path cannot await.
+
+    It must be closed rather than stored, otherwise garbage collection emits a
+    "coroutine was never awaited" `RuntimeWarning` on every failed async call.
+    """
+
+    class AsyncJsonResponse:
+        status_code = 500
+        headers = {"content-type": "application/json"}
+
+        def json(self) -> Any:  # noqa: ANN401
+            async def _load() -> dict[str, Any]:
+                return {"error": "server error"}
+
+            return _load()
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        generations = _generate_response_from_error(
+            MockAPIError("API Error", response=AsyncJsonResponse())
+        )
+        metadata = generations[0].message.response_metadata
+        # Drop the references inside the capture window so the collector emits the
+        # warning here rather than at interpreter shutdown.
+        del generations, metadata
+        gc.collect()
+
+    never_awaited = [w for w in caught if "never awaited" in str(w.message)]
+    assert never_awaited == []
 
 
 def test_filter_invocation_params_for_tracing() -> None:
