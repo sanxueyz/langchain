@@ -2866,6 +2866,46 @@ def test_tool_injected_tool_call_id_with_custom_schema() -> None:
     assert result == ToolMessage("42", tool_call_id="direct_id")
 
 
+def test_tool_injected_tool_call_id_with_json_schema_dict() -> None:
+    """InjectedToolCallId is injected when `args_schema` is a JSON schema dict."""
+    json_schema = {
+        "type": "object",
+        "properties": {"x": {"type": "integer"}},
+        "required": ["x"],
+    }
+
+    @tool(args_schema=json_schema)
+    def injected_tool(
+        x: int, tool_call_id: Annotated[str, InjectedToolCallId]
+    ) -> ToolMessage:
+        """Tool using a JSON schema dict plus an injected tool_call_id."""
+        return ToolMessage(str(x), tool_call_id=tool_call_id)
+
+    # The tool call id is injected even though it cannot be described by the dict.
+    result = injected_tool.invoke(
+        {
+            "type": "tool_call",
+            "args": {"x": 42},
+            "name": "injected_tool",
+            "id": "test_call_id",
+        }
+    )
+    assert result == ToolMessage("42", tool_call_id="test_call_id")
+
+    # A caller-provided id keeps working, exactly like a custom Pydantic schema.
+    result = injected_tool.invoke({"x": 42, "tool_call_id": "direct_id"})
+    assert result == ToolMessage("42", tool_call_id="direct_id")
+
+    # Without a tool call id there is nothing to inject, so fail loudly.
+    with pytest.raises(
+        ValueError,
+        match="When tool includes an InjectedToolCallId argument",
+    ):
+        injected_tool.invoke(
+            {"type": "tool_call", "args": {"x": 42}, "name": "injected_tool", "id": None}
+        )
+
+
 def test_tool_injected_arg_with_custom_schema() -> None:
     """Ensure InjectedToolArg works with custom args schema."""
 
