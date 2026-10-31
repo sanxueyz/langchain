@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import builtins  # noqa: TC003  # runtime-evaluated; subclass `dict()` shadows the builtin
 import contextlib
+import inspect
 import json
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable, Iterator, Sequence
@@ -116,7 +117,16 @@ def _generate_response_from_error(error: BaseException) -> list[ChatGeneration]:
         generation_info: dict[str, Any] = {}
         if hasattr(response, "json"):
             try:
-                metadata["body"] = response.json()
+                body = response.json()
+                if inspect.isawaitable(body):
+                    # A sync code path cannot await an async response's `json()`;
+                    # close the awaitable so it does not leak a
+                    # "coroutine ... was never awaited" RuntimeWarning.
+                    close = getattr(body, "close", None)
+                    if close is not None:
+                        close()
+                    body = None
+                metadata["body"] = body
             except Exception:
                 try:
                     metadata["body"] = getattr(response, "text", None)
