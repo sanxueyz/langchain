@@ -815,7 +815,27 @@ class ChildTool(BaseTool):
 
         if input_args is not None:
             if isinstance(input_args, dict):
-                return tool_input
+                # A JSON schema dict carries no annotations, so injected arguments are
+                # identified by the names collected from the tool's signature instead.
+                injected_keys = self._injected_args_keys
+                if not injected_keys:
+                    return tool_input
+                parsed_input = dict(tool_input)
+                for k in injected_keys:
+                    if k in parsed_input:
+                        continue
+                    if k == "tool_call_id":
+                        if tool_call_id is None:
+                            msg = (
+                                "When tool includes an InjectedToolCallId "
+                                "argument, tool must always be invoked with a full "
+                                "model ToolCall of the form: {'args': {...}, "
+                                "'name': '...', 'type': 'tool_call', "
+                                "'tool_call_id': '...'}"
+                            )
+                            raise ValueError(msg)
+                        parsed_input[k] = tool_call_id
+                return parsed_input
             result: BaseModel | BaseModelV1
             if issubclass(input_args, BaseModel):
                 # Check args_schema for InjectedToolCallId
